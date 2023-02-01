@@ -5,7 +5,7 @@ import kuramoto
 import numpy as np
 import networkx as nx
 from networkx.drawing.nx_pydot import graphviz_layout
-from scipy import signal
+from scipy import stats, signal
 import matplotlib.pyplot as plt
 import matplotlib
 matplotlib.use("TkAgg")
@@ -98,7 +98,7 @@ if __name__ == '__main__':
     nx.draw(graph_nx, pos, node_color='lightblue', edge_color='#909090', node_size=200, with_labels=True)
     plt.show()
 
-    graph = nx.to_numpy_array(graph_nx) * np.random.rand(n_neurons, n_neurons) * .1
+    graph = nx.to_numpy_array(graph_nx) * np.random.rand(n_neurons, n_neurons) * .4
     # graph = nx.to_numpy_array(graph_nx)
 
     angles_vec = 2 * np.pi * np.random.random(size=n_neurons) - np.pi
@@ -117,8 +117,9 @@ if __name__ == '__main__':
     y_phase_coherence = np.array([])
     x_time2 = [0]
     y_mean_freqs = [natfreqs]
+    # x_time3 = []
+    # y_partial_stat = []
 
-    # plt_pause(20)
     for j, t_curr in enumerate(np.arange(0., T + t_step, t_step)):
         activity, frequencies = run(_graph=graph, _angles_vec_init=angles_vec, _nat_freqs_init=natfreqs)
 
@@ -128,8 +129,8 @@ if __name__ == '__main__':
         freqs_vec = frequencies.T[-1]
         mean_freqs = np.sum(frequencies * dt, axis=1) / t_step
 
-        # natfreqs[:] = mean_freqs[:]
-        natfreqs[:] = freqs_vec[:]
+        natfreqs[:] = mean_freqs[:]
+        # natfreqs[:] = freqs_vec[:]
 
         x_time = np.hstack((x_time, np.arange(t_curr, t_curr + t_step, dt)))
         y_angles = np.hstack((y_angles, np.sin(activity)))
@@ -146,10 +147,10 @@ if __name__ == '__main__':
         axes[2].set_ylabel(r'$\overline{\omega} = $' + '{:.3f}'.format(np.mean(mean_freqs)), rotation=0)
 
         N = int(t_step/dt)
+
         axes[0].plot(x_time[-10*N:], y_angles.T[-10*N:])
         axes[1].plot(x_time[-100*N:], y_phase_coherence[-100*N:], color='forestgreen')
         axes[2].plot(x_time2[-100:], y_mean_freqs[-100:])
-        plt_pause(0.00000000001)
 
         # if not os.path.exists('anim'):
         #     os.makedirs('anim')
@@ -159,14 +160,21 @@ if __name__ == '__main__':
             print('\nПолная синхронизация!')
             break
 
-        check_prev_epochs = 250
-        if j > check_prev_epochs - 1:
-            corr = signal.correlate(y_phase_coherence[-check_prev_epochs*N:-N], phase_coherence, mode='valid') / \
-                np.sum(phase_coherence)
-            print(corr.shape)
-            print('{:.4f}'.format(np.max(corr)))
-            if np.any(np.isclose(corr, 1.)):
-                print('\nЧастичная синхронизация!')
-                break
+        # # if t_curr % (N * 10) == 0 and j != 0:
+        # if t_curr > N * 10:
+        #     prev = np.asarray([y_phase_coherence[k:k + len(phase_coherence)]
+        #                        for k in range(-N * 10, -len(phase_coherence) * 2, 1)])
+        #     corr = np.asarray([stats.pearsonr(phase_coherence, p) for p in prev])
+        #
+        #     x_time3.append(t_curr)
+        #     y_partial_stat.append([np.max(corr), np.mean(corr), np.min(corr)])
+        #     # print('max: {:.4f} \t mean: {:.4f} \t min: {:.4f}'.format(np.max(corr), np.mean(corr), np.min(corr)))
+        #     axes[3].plot(x_time3[-100:], y_partial_stat[-100:])
+        #
+        #     if np.any(np.isclose(corr, 1.)):
+        #         print('\nЧастичная синхронизация!')
+        #         break
+
+        plt_pause(0.00000000001)
 
     plt.show(block=True)
