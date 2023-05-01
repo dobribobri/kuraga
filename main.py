@@ -14,7 +14,7 @@ matplotlib.use("TkAgg")
 
 dt, t_step, T = 0.1, 10, 15000
 
-seed = 28
+seed = 4
 np.random.seed(seed)
 
 
@@ -95,7 +95,7 @@ def multilayered_graph(oriented=False, *subset_sizes) -> nx.Graph:
 if __name__ == '__main__':
     n_neurons = 7
 
-    # graph_nx = nx.erdos_renyi_graph(n=n_neurons, p=1)     # полносвязный
+    graph_nx = nx.erdos_renyi_graph(n=n_neurons, p=1)     # полносвязный
 
     # graph_nx = nx.circulant_graph(n_neurons, [1])   # кольцо
 
@@ -109,7 +109,7 @@ if __name__ == '__main__':
 
     # graph_nx = nx.erdos_renyi_graph(n=n_neurons, p=0.5)     # случайный
 
-    graph_nx = multilayered_graph(True, *[4, 3])
+    # graph_nx = multilayered_graph(True, *[4, 3])
 
     # n_neurons = 8
     # extents = nx.utils.pairwise(itertools.accumulate((0,) + (4, 3, 1)))
@@ -134,8 +134,8 @@ if __name__ == '__main__':
     # natfreqs *= 0.
     natfreqs = [5.1, 3.5, 1.4, 0.2, 0, 0, 0]
 
-    graph = nx.to_numpy_array(graph_nx) * np.random.rand(n_neurons, n_neurons) * 10 + 0.4
-    # graph = nx.to_numpy_array(graph_nx) * np.random.rand(n_neurons, n_neurons) + 0.001
+    # graph = nx.to_numpy_array(graph_nx) * np.random.rand(n_neurons, n_neurons) * 10 + 0.1
+    graph = nx.to_numpy_array(graph_nx) * np.random.rand(n_neurons, n_neurons) * 0.4
     # graph = nx.to_numpy_array(graph_nx)
 
     plt.ion()
@@ -201,7 +201,9 @@ if __name__ == '__main__':
             print('\nЧастичная синхронизация!')
             break
 
-        # plt.savefig('1/{}.png'.format(str(j).zfill(5)), dpi=300)
+        # if not os.path.exists(os.path.join('partial', '2')):
+        #     os.makedirs(os.path.join('partial', '2'))
+        # plt.savefig('partial/2/{}.png'.format(str(j).zfill(5)), dpi=300)
         plt_pause(0.00000000001)
 
     plt.show(block=True)
