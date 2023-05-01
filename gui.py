@@ -1,18 +1,17 @@
 # -*- coding: utf-8 -*-
 import sys
-import itertools
-from collections import defaultdict
 import numpy as np
 import networkx as nx
 from networkx.drawing.nx_pydot import graphviz_layout
 import kuramoto
 from switch import Switch
-import time
 from enum import Enum
 import threading
 from tkinter import *
 from matplotlib import pyplot as plt
-import matplotlib as mpl
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+import matplotlib
+matplotlib.use("TkAgg")
 
 
 class Kuramoto(kuramoto.Kuramoto):
@@ -70,22 +69,22 @@ class AdjMatMultiplierMode(Enum):
 
 class ONN:
     def __init__(self, _dt: float = 0.1, _t_step: float = 10., _T: float = 15000,
-                 _N: int = 7, _K: float = 0.4,
+                 _N: int = 7, _K: float = 0.2,
                  _p: float = 1.,
                  _seed: int = 42,
 
-                 _topology_mode: TopologyMode = TopologyMode.FULL,
-                 _adjmat_multiplier_mode: AdjMatMultiplierMode = AdjMatMultiplierMode.NO,
+                 _topology_mode: TopologyMode = TopologyMode.RAND,
+                 _adjmat_multiplier_mode: AdjMatMultiplierMode = AdjMatMultiplierMode.RAND1,
                  _initial_phase_mode: InitialPhaseMode = InitialPhaseMode.ZERO,
-                 _initial_frequency_mode: InitialFrequencyMode = InitialFrequencyMode.ZERO,):
+                 _initial_frequency_mode: InitialFrequencyMode = InitialFrequencyMode.RAND1,):
 
-        self.dt, self.t_step, self.T = _dt, _t_step, _T
+        self._dt, self._t_step, self.T = _dt, _t_step, _T
         self._N, self._K = _N, _K
         self._p = _p
         self._seed = _seed
 
         self._topology_mode = _topology_mode
-        self.multiplier_mode = _adjmat_multiplier_mode
+        self._multiplier_mode = _adjmat_multiplier_mode
 
         self.initial_phase_mode = _initial_phase_mode
         self.initial_frequency_mode = _initial_frequency_mode
@@ -93,11 +92,40 @@ class ONN:
         self.graph_nx = self.new_graph_nx()
         self.adj_mat = self.new_adjmat()
 
-        self.phase_vec_init = None
-        self.nat_freqs_init = None
-        self.initialize()
+        self.phase_vec_init = self.new_phase_vec_init()
+        self.nat_freqs_init = self.new_nat_freqs_init()
 
-    def initialize(self):
+        self.TIME, self.PHASES, self.FREQUENCIES, self.PHASE_COHERENCE = None, None, None, None
+        self.TIME_, self.MEAN_FREQS, self.LAST_FREQS, self.F_NORM = None, None, None, None
+        self.clear_stats()
+
+        self.N_lock = threading.Lock()
+        self.dt_lock = threading.Lock()
+        self.t_step_lock = threading.Lock()
+
+    def clear_stats(self):
+        self.TIME = np.array([])
+        self.PHASES = np.array([[]] * self._N)
+        self.FREQUENCIES = np.array([[]] * self._N)
+        self.PHASE_COHERENCE = np.array([])
+        self.TIME_ = []
+        self.MEAN_FREQS = []
+        self.LAST_FREQS = []
+        self.F_NORM = []
+
+    def update_stats(self, _time, _phases, _frequencies, _phase_coherence,
+                     _time_, _mean_freqs, _last_freqs, _f_norm=None):
+        self.TIME = np.hstack((self.TIME, _time))
+        self.PHASES = np.hstack((self.PHASES, _phases))
+        self.FREQUENCIES = np.hstack((self.FREQUENCIES, _frequencies))
+        self.PHASE_COHERENCE = np.hstack((self.PHASE_COHERENCE, _phase_coherence))
+        self.TIME_.append(_time_)
+        self.MEAN_FREQS.append(_mean_freqs)
+        self.LAST_FREQS.append(_last_freqs)
+        if _f_norm:
+            self.F_NORM.append(_f_norm)
+
+    def new_phase_vec_init(self):
         with Switch(self.initial_phase_mode) as case:
             if case(InitialPhaseMode.ZERO):
                 phase_vec_init = np.zeros(self.N)
@@ -105,9 +133,10 @@ class ONN:
                 phase_vec_init = 2 * np.pi * np.random.random(size=self.N) - np.pi
             if case.default:
                 phase_vec_init = np.zeros(self.N)
-        self.phase_vec_init = phase_vec_init
+        return phase_vec_init
 
-        with Switch(self.nat_freqs_init) as case:
+    def new_nat_freqs_init(self):
+        with Switch(self.initial_frequency_mode) as case:
             if case(InitialFrequencyMode.ZERO):
                 nat_freqs_init = np.zeros(self.N)
             if case(InitialFrequencyMode.RAND1):
@@ -116,7 +145,7 @@ class ONN:
                 nat_freqs_init = 2 * np.random.random(size=self.N) - 1
             if case.default:
                 nat_freqs_init = np.zeros(self.N)
-        self.nat_freqs_init = nat_freqs_init
+        return nat_freqs_init
 
     def new_graph_nx(self):
         with Switch(self.topology_mode) as case:
@@ -165,6 +194,15 @@ class ONN:
         self.adj_mat = adj_mat
 
     @property
+    def multiplier_mode(self):
+        return self._multiplier_mode
+
+    @multiplier_mode.setter
+    def multiplier_mode(self, _multiplier_mode):
+        self._multiplier_mode = _multiplier_mode
+        self.adj_mat = self.new_adjmat()
+
+    @property
     def K(self):
         return self._K
 
@@ -179,15 +217,27 @@ class ONN:
 
     @N.setter
     def N(self, _N: int):
+        self.N_lock.acquire()
         assert _N > 0, ''
         self._N = _N
         self.graph_nx = self.new_graph_nx()
-        if _N <= len(self.adj_mat):
-            self.adj_mat = self.adj_mat[0:_N, 0:_N]
+        N_ = len(self.adj_mat)
+        if _N <= N_:
+            self.adj_mat = self.adj_mat[:_N, :_N]
+            self.phase_vec_init = self.phase_vec_init[:_N]
+            self.nat_freqs_init = self.nat_freqs_init[:_N]
         else:
             adj_mat = self.new_adjmat()
-            adj_mat[0:len(self.adj_mat), 0:len(self.adj_mat)] = self.adj_mat[:, :]
+            adj_mat[:N_, :N_] = self.adj_mat[:, :]
             self.adj_mat = adj_mat
+            phase_vec_init = self.new_phase_vec_init()
+            phase_vec_init[:N_] = self.phase_vec_init
+            self.phase_vec_init = phase_vec_init
+            nat_freqs_init = self.new_nat_freqs_init()
+            nat_freqs_init[:N_] = self.nat_freqs_init
+            self.nat_freqs_init = nat_freqs_init
+        self.clear_stats()
+        self.N_lock.release()
 
     @property
     def p(self):
@@ -206,47 +256,124 @@ class ONN:
         self._seed = _seed
         np.random.seed(_seed)
 
+    @property
+    def dt(self):
+        return self._dt
+
+    @dt.setter
+    def dt(self, _dt):
+        self.dt_lock.acquire()
+        self._dt = _dt
+        self.dt_lock.release()
+
+    @property
+    def t_step(self):
+        return self._t_step
+
+    @t_step.setter
+    def t_step(self, _t_step):
+        self.t_step_lock.acquire()
+        self._t_step = _t_step
+        self.t_step_lock.release()
+
+    def run(self, _axes, _canvas, _pause_event, _stop_event, _save_plots):
+
+        self.clear_stats()
+
+        self.phase_vec_init = self.new_phase_vec_init()
+        self.nat_freqs_init = self.new_nat_freqs_init()
+
+        t_curr = 0.
+        freqs_vec_curr = self.nat_freqs_init
+        phase_vec_curr = self.phase_vec_init
+        while (t_curr <= self.T) and not(_stop_event.is_set()):
+
+            self.N_lock.acquire()
+            if self.N <= len(freqs_vec_curr):
+                freqs_vec_curr = freqs_vec_curr[:self.N]
+            else:
+                nat_freqs_init = self.new_nat_freqs_init()
+                nat_freqs_init[:len(freqs_vec_curr)] = freqs_vec_curr
+                freqs_vec_curr = nat_freqs_init
+
+            if self.N <= len(phase_vec_curr):
+                phase_vec_curr = phase_vec_curr[:self.N]
+            else:
+                phase_vec_init = self.new_phase_vec_init()
+                phase_vec_init[:len(phase_vec_curr)] = phase_vec_curr
+                phase_vec_curr = phase_vec_init
+
+            self.dt_lock.acquire()
+            self.t_step_lock.acquire()
+            ####################################################################################################
+            model = Kuramoto(coupling=1, dt=self.dt, T=self.t_step, n_nodes=self.N, natfreqs=freqs_vec_curr, )
+            activity = model.run(adj_mat=self.adj_mat, angles_vec=phase_vec_curr)
+            frequencies = model.frequencies(act_mat=activity, adj_mat=self.adj_mat)
+            phase_coherence = np.asarray([Kuramoto.phase_coherence(vec) for vec in activity.T])
+            ####################################################################################################
+
+            phase_vec_curr = activity.T[-1]
+            last_freqs = frequencies.T[-1]
+
+            mean_freqs = np.sum(frequencies * self.dt, axis=1) / self.t_step
+
+            freqs_vec_curr = last_freqs
+            # freqs_vec_curr = mean_freqs
+
+            self.update_stats(_time=np.linspace(t_curr, t_curr + self.t_step, len(activity.T)),
+                              _phases=np.sin(activity),
+                              _frequencies=frequencies,
+                              _phase_coherence=phase_coherence,
+                              _time_=t_curr + self.t_step,
+                              _last_freqs=last_freqs,
+                              _mean_freqs=mean_freqs)
+            self.N_lock.release()
+            self.dt_lock.release()
+
+            t_curr += self.t_step
+            self.t_step_lock.release()
+
+            # Redraw plots
+            for i in range(3):
+                _axes[i].clear()
+            M = len(activity.T)
+            _axes[0].set_ylabel(r'$\sin(\theta_i)$    ', rotation=0)
+            _axes[0].plot(self.TIME[-10 * M:], self.PHASES.T[-10 * M:])
+            _axes[1].set_ylabel('Coherence')
+            _axes[1].plot(self.TIME[-100 * M:], self.PHASE_COHERENCE[-100 * M:], color='forestgreen')
+            _axes[2].set_ylabel(r'$\overline{\omega}_i$    ', rotation=0)
+            _axes[2].plot(self.TIME_[-100:], self.LAST_FREQS[-100:])
+
+            # Критерий полной синхронизации
+            if np.all(np.isclose(phase_coherence, 1.)):
+                print('\nПолная синхронизация!')
+                break
+
+            # Критерий частичной синхронизации
+            if len(self.MEAN_FREQS) > 20:
+                cr1 = np.linalg.norm(np.asarray(self.MEAN_FREQS[-20:]) - mean_freqs)
+                self.F_NORM.append(cr1)
+                if len(self.F_NORM) > 20:
+                    f_norm = np.asarray(self.F_NORM[-20:])
+                    cr2 = np.linalg.norm(f_norm - np.mean(f_norm))
+                    if cr1 < 0.1 or cr2 < 0.1:
+                        print('\nЧастичная синхронизация!')
+                        break
+
+            _pause_event.wait()
+            _canvas.draw()
+
     def show_graph(self):
         pos = graphviz_layout(self.graph_nx, prog='dot')
         nx.draw(self.graph_nx, pos, node_color='lightblue', edge_color='#909090', node_size=200, with_labels=True)
-        plt.show()
-
-    def run(self, _pause_event, _stop_event):
-        self.initialize()
-
-        time_ = np.array([])
-        angles_ = np.array([[]] * self.N)
-        frequencies_ = np.array([[]] * self.N)
-        phase_coherence_ = np.array([])
-
-        t_curr = 0.
-        natfreqs = self.nat_freqs_init
-        angles_vec = self.phase_vec_init
-        while (t_curr <= self.T) and not(_stop_event.is_set()):
-            model = Kuramoto(coupling=1, dt=self.dt, T=self.t_step, n_nodes=self.N, natfreqs=natfreqs, )
-            activity = model.run(adj_mat=self.adj_mat, angles_vec=angles_vec)
-            frequencies = model.frequencies(act_mat=activity, adj_mat=self.adj_mat)
-            phase_coherence = np.asarray([Kuramoto.phase_coherence(vec) for vec in activity.T])
-
-            if np.all(np.isclose(phase_coherence, 1.)):
-                break
-
-            time_ = np.hstack((time_, np.arange(t_curr, t_curr + self.t_step, self.dt)))
-            angles_ = np.hstack((angles_, np.sin(activity)))
-            frequencies_ = np.hstack((frequencies_, frequencies))
-            phase_coherence_ = np.hstack((phase_coherence_, phase_coherence))
-
-            angles_vec = activity.T[-1]
-            natfreqs = frequencies.T[-1]
-
-            t_curr += self.t_step
-            _pause_event.wait()
+        plt.show(block=True)
 
 
 if __name__ == '__main__':
     onn = ONN()
 
     root = Tk()
+
     root.title('Курамото v0.1')
     root.geometry('{:.0f}x{:.0f}'.format(875, 650))
     root.resizable(width=False, height=False)
@@ -256,7 +383,6 @@ if __name__ == '__main__':
     dt = DoubleVar(root, value=onn.dt)
     t_step = DoubleVar(root, value=onn.t_step)
     T = DoubleVar(root, value=onn.T)
-    topology = StringVar(root, value=onn.topology_mode.name)
     p = DoubleVar(root, value=onn.p)
     seed = IntVar(root, value=onn.seed)
 
@@ -265,6 +391,8 @@ if __name__ == '__main__':
     menu = [Menu(main_menu, tearoff=0) for _ in range(5)]
 
     # Топология
+    topology = StringVar(root, value=onn.topology_mode.name)
+
     menu[0].add_radiobutton(label=TopologyMode.FULL.name,
                             variable=topology, value=TopologyMode.FULL.name,
                             command=lambda: onn.__setattr__('topology_mode', TopologyMode.FULL))
@@ -286,39 +414,58 @@ if __name__ == '__main__':
     menu[0].add_command(label='Предпросмотр...', command=lambda: onn.show_graph())
 
     # Матрица смежности
+    multiplier = StringVar(root, value=onn.multiplier_mode.name)
+
     menu[1].add_radiobutton(label=AdjMatMultiplierMode.NO.name,
+                            variable=multiplier, value=AdjMatMultiplierMode.NO.name,
                             command=lambda: onn.__setattr__('multiplier_mode', AdjMatMultiplierMode.NO))
     menu[1].add_radiobutton(label=AdjMatMultiplierMode.RAND1.name,
+                            variable=multiplier, value=AdjMatMultiplierMode.RAND1.name,
                             command=lambda: onn.__setattr__('multiplier_mode', AdjMatMultiplierMode.RAND1))
     menu[1].add_radiobutton(label=AdjMatMultiplierMode.RAND2.name,
+                            variable=multiplier, value=AdjMatMultiplierMode.RAND2.name,
                             command=lambda: onn.__setattr__('multiplier_mode', AdjMatMultiplierMode.RAND2))
-    menu[1].add_separator()
-    menu[1].add_command(label='Тонкая настройка...')
+    # menu[1].add_separator()
+    # menu[1].add_command(label='Тонкая настройка...')
 
     # Начальные фазы
+    initial_phase = StringVar(root, value=onn.initial_phase_mode.name)
+
     menu[2].add_radiobutton(label=InitialPhaseMode.ZERO.name,
+                            variable=initial_phase, value=InitialPhaseMode.ZERO.name,
                             command=lambda: onn.__setattr__('initial_phase_mode', InitialPhaseMode.ZERO))
     menu[2].add_radiobutton(label=InitialPhaseMode.RAND.name,
+                            variable=initial_phase, value=InitialPhaseMode.RAND.name,
                             command=lambda: onn.__setattr__('initial_phase_mode', InitialPhaseMode.RAND))
-    menu[2].add_separator()
-    menu[2].add_command(label='Тонкая настройка...')
+    # menu[2].add_separator()
+    # menu[2].add_command(label='Тонкая настройка...')
 
     # Собственные частоты
+    initial_frequency = StringVar(root, value=onn.initial_frequency_mode.name)
+
     menu[3].add_radiobutton(label=InitialFrequencyMode.ZERO.name,
+                            variable=initial_frequency, value=InitialFrequencyMode.ZERO.name,
                             command=lambda: onn.__setattr__('initial_frequency_mode', InitialFrequencyMode.ZERO))
     menu[3].add_radiobutton(label=InitialFrequencyMode.RAND1.name,
+                            variable=initial_frequency, value=InitialFrequencyMode.RAND1.name,
                             command=lambda: onn.__setattr__('initial_frequency_mode', InitialFrequencyMode.RAND1))
     menu[3].add_radiobutton(label=InitialFrequencyMode.RAND2.name,
+                            variable=initial_frequency, value=InitialFrequencyMode.RAND2.name,
                             command=lambda: onn.__setattr__('initial_frequency_mode', InitialFrequencyMode.RAND2))
-    menu[3].add_separator()
-    menu[3].add_command(label='Тонкая настройка...')
+    # menu[3].add_separator()
+    # menu[3].add_command(label='Тонкая настройка...')
 
     # Другие параметры
-    menu[4].add_checkbutton(label='Рисовать фазы')
-    menu[4].add_checkbutton(label='Рисовать параметр порядка')
-    menu[4].add_checkbutton(label='Рисовать частоты')
-    menu[4].add_separator()
-    menu[4].add_checkbutton(label='Сохранять графики')
+    # draw_phases = BooleanVar(value=True)
+    # draw_coherence = BooleanVar(value=True)
+    # draw_frequencies = BooleanVar(value=True)
+    save_plots = BooleanVar(value=False)
+
+    # menu[4].add_checkbutton(label='Рисовать фазы', variable=draw_phases)
+    # menu[4].add_checkbutton(label='Рисовать параметр порядка', variable=draw_coherence)
+    # menu[4].add_checkbutton(label='Рисовать частоты', variable=draw_frequencies)
+    # menu[4].add_separator()
+    menu[4].add_checkbutton(label='Сохранять графики', variable=save_plots)
 
     main_menu.add_cascade(label='Топология', menu=menu[0])
     main_menu.add_cascade(label='Матрица смежности', menu=menu[1])
@@ -410,9 +557,27 @@ if __name__ == '__main__':
 
     stop_event = threading.Event()
 
+    window = None
+
     def start():
         stop_event.clear()
-        threading.Thread(target=onn.run, args=(resume_event, stop_event, )).start()
+
+        global window
+        window = Toplevel(root)
+        # plt.ion()
+        fig, axes = plt.subplots(figsize=(10, 7), ncols=1, nrows=3)
+        canvas = FigureCanvasTkAgg(fig, master=window)
+        canvas.draw()
+        canvas.get_tk_widget().pack(side=TOP, fill=BOTH, expand=1)
+        # canvas._tkcanvas.pack(side=TOP, fill=BOTH, expand=1)
+        # plt.show(block=False)
+
+        threading.Thread(target=onn.run,
+                         args=(axes, canvas, resume_event, stop_event, save_plots.get(), ),
+                         ).start()
+
+        # plt.show(block=True)
+
         button_start.config(state=DISABLED)
         button_pause.config(state=NORMAL)
         button_stop.config(state=NORMAL)
@@ -436,6 +601,9 @@ if __name__ == '__main__':
         button_start.config(state=NORMAL)
         button_pause.config(state=DISABLED)
         button_stop.config(state=DISABLED)
+        global window
+        # noinspection PyUnresolvedReferences
+        window.destroy()
 
     button_start.config(command=lambda: start())
     button_pause.config(command=lambda: pause())
