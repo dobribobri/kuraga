@@ -8,6 +8,7 @@ from switch import Switch
 from enum import Enum
 import threading
 from tkinter import *
+from tkinter.messagebox import showinfo
 from matplotlib import pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 import matplotlib
@@ -70,7 +71,7 @@ class AdjMatMultiplierMode(Enum):
 class ONN:
     def __init__(self, _dt: float = 0.1, _t_step: float = 10., _T: float = 15000,
                  _N: int = 7, _K: float = 0.2,
-                 _p: float = 1.,
+                 _p: float = .6,
                  _seed: int = 42,
 
                  _topology_mode: TopologyMode = TopologyMode.RAND,
@@ -245,7 +246,8 @@ class ONN:
 
     @p.setter
     def p(self, _p: float):
-        self.topology_mode = self._topology_mode
+        self._p = _p
+        self.__setattr__('topology_mode', self._topology_mode)
 
     @property
     def seed(self):
@@ -346,7 +348,8 @@ class ONN:
 
             # Критерий полной синхронизации
             if np.all(np.isclose(phase_coherence, 1.)):
-                print('\nПолная синхронизация!')
+                # print('\nПолная синхронизация!')
+                showinfo(title='Сообщение', message='Полная синхронизация!')
                 break
 
             # Критерий частичной синхронизации
@@ -357,16 +360,17 @@ class ONN:
                     f_norm = np.asarray(self.F_NORM[-20:])
                     cr2 = np.linalg.norm(f_norm - np.mean(f_norm))
                     if cr1 < 0.1 or cr2 < 0.1:
-                        print('\nЧастичная синхронизация!')
+                        # print('\nЧастичная синхронизация!')
+                        showinfo(title='Сообщение', message='Частичная синхронизация!')
                         break
 
             _pause_event.wait()
             _canvas.draw()
 
-    def show_graph(self):
-        pos = graphviz_layout(self.graph_nx, prog='dot')
+    def show_graph(self, _canvas):
+        pos = graphviz_layout(self.graph_nx, prog='dot', root=_canvas)
         nx.draw(self.graph_nx, pos, node_color='lightblue', edge_color='#909090', node_size=200, with_labels=True)
-        plt.show(block=True)
+        _canvas.draw()
 
 
 if __name__ == '__main__':
@@ -375,7 +379,7 @@ if __name__ == '__main__':
     root = Tk()
 
     root.title('Курамото v0.1')
-    root.geometry('{:.0f}x{:.0f}'.format(875, 650))
+    root.geometry('{:.0f}x{:.0f}'.format(875, 575))
     root.resizable(width=False, height=False)
 
     N = IntVar(root, value=onn.N)
@@ -411,7 +415,20 @@ if __name__ == '__main__':
                             variable=topology, value=TopologyMode.RAND.name,
                             command=lambda: onn.__setattr__('topology_mode', TopologyMode.RAND))
     menu[0].add_separator()
-    menu[0].add_command(label='Предпросмотр...', command=lambda: onn.show_graph())
+
+    window_graph = None
+
+    # def show_graph():
+    #     global window_graph
+    #     window_graph = Toplevel(root)
+    #     window_graph.title('Граф связей')
+    #     fig, _ = plt.subplots(figsize=(5, 4))
+    #     canvas = FigureCanvasTkAgg(fig, master=window_graph)
+    #     canvas.draw()
+    #     canvas.get_tk_widget().pack(side=TOP, fill=BOTH, expand=1)
+    #     onn.show_graph(canvas)
+    #
+    # menu[0].add_command(label='Предпросмотр...', command=lambda: show_graph())
 
     # Матрица смежности
     multiplier = StringVar(root, value=onn.multiplier_mode.name)
@@ -465,7 +482,7 @@ if __name__ == '__main__':
     # menu[4].add_checkbutton(label='Рисовать параметр порядка', variable=draw_coherence)
     # menu[4].add_checkbutton(label='Рисовать частоты', variable=draw_frequencies)
     # menu[4].add_separator()
-    menu[4].add_checkbutton(label='Сохранять графики', variable=save_plots)
+    menu[4].add_checkbutton(label='Сохранять графики', variable=save_plots, state=DISABLED)
 
     main_menu.add_cascade(label='Топология', menu=menu[0])
     main_menu.add_cascade(label='Матрица смежности', menu=menu[1])
@@ -475,7 +492,7 @@ if __name__ == '__main__':
 
     spinbox_N = Spinbox(root, from_=4, to=sys.maxsize, increment=1, textvariable=N,
                         command=lambda: onn.__setattr__('N', N.get()))
-    spinbox_K = Spinbox(root, from_=0.01, to=100, increment=0.01, textvariable=K,
+    spinbox_K = Spinbox(root, from_=0.001, to=10, increment=0.001, textvariable=K,
                         command=lambda: onn.__setattr__('K', K.get()))
     spinbox_dt = Spinbox(root, from_=0.01, to=sys.maxsize, increment=0.01, textvariable=dt,
                          command=lambda: onn.__setattr__('dt', dt.get()))
@@ -483,8 +500,8 @@ if __name__ == '__main__':
                              command=lambda: onn.__setattr__('t_step', t_step.get()))
     spinbox_T = Spinbox(root, from_=0.1, to=sys.maxsize, increment=100, textvariable=T,
                         command=lambda: onn.__setattr__('T', T.get()))
-    spinbox_seed = Spinbox(root, from_=0, to=sys.maxsize, increment=1, textvariable=seed,
-                           command=lambda: onn.__setattr__('seed', seed.get()))
+    # spinbox_seed = Spinbox(root, from_=0, to=sys.maxsize, increment=1, textvariable=seed,
+    #                        command=lambda: onn.__setattr__('seed', seed.get()))
     spinbox_p = Spinbox(root, from_=0.4, to=1, increment=0.01, textvariable=p,
                         command=lambda: onn.__setattr__('p', p.get()))
 
@@ -493,15 +510,15 @@ if __name__ == '__main__':
     spinbox_dt.grid(row=2, column=2, padx=10, pady=10, sticky=W)
     spinbox_t_step.grid(row=3, column=2, padx=10, pady=10, sticky=W)
     spinbox_T.grid(row=4, column=2, padx=10, pady=10, sticky=W)
-    spinbox_seed.grid(row=5, column=2, padx=10, pady=10, sticky=W)
-    spinbox_p.grid(row=6, column=2, padx=10, pady=10, sticky=W)
+    # spinbox_seed.grid(row=5, column=2, padx=10, pady=10, sticky=W)
+    spinbox_p.grid(row=5, column=2, padx=10, pady=10, sticky=W)
 
     label_N = Label(root, text=' N ')
     label_K = Label(root, text=' K ')
     label_dt = Label(root, text=' dt ')
     label_t_step = Label(root, text=' t_step ')
     label_T = Label(root, text=' T ')
-    label_seed = Label(root, text=' seed ')
+    # label_seed = Label(root, text=' seed ')
     label_p = Label(root, text=' p ')
 
     label_N.grid(row=0, column=0, padx=10, pady=10, sticky=E)
@@ -509,16 +526,16 @@ if __name__ == '__main__':
     label_dt.grid(row=2, column=0, padx=10, pady=10, sticky=E)
     label_t_step.grid(row=3, column=0, padx=10, pady=10, sticky=E)
     label_T.grid(row=4, column=0, padx=10, pady=10, sticky=E)
-    label_seed.grid(row=5, column=0, padx=10, pady=10, sticky=E)
-    label_p.grid(row=6, column=0, padx=10, pady=10, sticky=E)
+    # label_seed.grid(row=5, column=0, padx=10, pady=10, sticky=E)
+    label_p.grid(row=5, column=0, padx=10, pady=10, sticky=E)
 
     scale_N = Scale(root, orient=HORIZONTAL, from_=4, to=100, tickinterval=8, resolution=1, variable=N,
                     length=550, sliderlength=30,
                     command=lambda _: onn.__setattr__('N', N.get()))
-    scale_K = Scale(root, orient=HORIZONTAL, from_=0.01, to=100, tickinterval=10, resolution=0.01, variable=K,
+    scale_K = Scale(root, orient=HORIZONTAL, from_=0.001, to=10, tickinterval=1, resolution=0.001, variable=K,
                     length=550, sliderlength=30,
                     command=lambda _: onn.__setattr__('K', K.get()))
-    scale_dt = Scale(root, orient=HORIZONTAL, from_=0.001, to=0.5, tickinterval=0.05, resolution=0.01, variable=dt,
+    scale_dt = Scale(root, orient=HORIZONTAL, from_=0.01, to=0.5, tickinterval=0.05, resolution=0.01, variable=dt,
                      length=550, sliderlength=30,
                      command=lambda _: onn.__setattr__('dt', dt.get()))
     scale_t_step = Scale(root, orient=HORIZONTAL, from_=1, to=100, tickinterval=14, resolution=0.1, variable=t_step,
@@ -527,9 +544,9 @@ if __name__ == '__main__':
     scale_T = Scale(root, orient=HORIZONTAL, from_=1000, to=150000, tickinterval=149000, resolution=1, variable=T,
                     length=550, sliderlength=30,
                     command=lambda _: onn.__setattr__('T', T.get()))
-    scale_seed = Scale(root, orient=HORIZONTAL, from_=0, to=1000, tickinterval=100, resolution=1, variable=seed,
-                       length=550, sliderlength=30,
-                       command=lambda _: onn.__setattr__('seed', seed.get()))
+    # scale_seed = Scale(root, orient=HORIZONTAL, from_=0, to=1000, tickinterval=100, resolution=1, variable=seed,
+    #                    length=550, sliderlength=30,
+    #                    command=lambda _: onn.__setattr__('seed', seed.get()))
     scale_p = Scale(root, orient=HORIZONTAL, from_=0.4, to=1, tickinterval=0.1, resolution=0.001, variable=p,
                     length=550, sliderlength=30,
                     command=lambda _: onn.__setattr__('p', p.get()))
@@ -539,17 +556,17 @@ if __name__ == '__main__':
     scale_dt.grid(row=2, column=1, padx=10, pady=10)
     scale_t_step.grid(row=3, column=1, padx=10, pady=10)
     scale_T.grid(row=4, column=1, padx=10, pady=10)
-    scale_seed.grid(row=5, column=1, padx=10, pady=10)
-    scale_p.grid(row=6, column=1, padx=10, pady=10)
+    # scale_seed.grid(row=5, column=1, padx=10, pady=10)
+    scale_p.grid(row=5, column=1, padx=10, pady=10)
 
     button_start = Button(root, text="Старт", width=20)
-    button_start.grid(row=7, column=2, padx=10, pady=10)
+    button_start.grid(row=6, column=2, padx=10, pady=10)
     button_start.config(state=NORMAL)
     button_pause = Button(root, text="Пауза", width=20)
-    button_pause.grid(row=7, column=1, padx=10, pady=10, sticky=E)
+    button_pause.grid(row=6, column=1, padx=10, pady=10, sticky=E)
     button_pause.config(state=DISABLED)
     button_stop = Button(root, text="Стоп", width=20)
-    button_stop.grid(row=7, column=1, padx=10, pady=10, sticky=W)
+    button_stop.grid(row=6, column=1, padx=10, pady=10, sticky=W)
     button_stop.config(state=DISABLED)
 
     resume_event = threading.Event()
@@ -557,26 +574,22 @@ if __name__ == '__main__':
 
     stop_event = threading.Event()
 
-    window = None
+    window_simulation = None
 
     def start():
         stop_event.clear()
 
-        global window
-        window = Toplevel(root)
-        # plt.ion()
+        global window_simulation
+        window_simulation = Toplevel(root)
+        window_simulation.title('Симуляция')
         fig, axes = plt.subplots(figsize=(10, 7), ncols=1, nrows=3)
-        canvas = FigureCanvasTkAgg(fig, master=window)
+        canvas = FigureCanvasTkAgg(fig, master=window_simulation)
         canvas.draw()
         canvas.get_tk_widget().pack(side=TOP, fill=BOTH, expand=1)
-        # canvas._tkcanvas.pack(side=TOP, fill=BOTH, expand=1)
-        # plt.show(block=False)
 
         threading.Thread(target=onn.run,
                          args=(axes, canvas, resume_event, stop_event, save_plots.get(), ),
                          ).start()
-
-        # plt.show(block=True)
 
         button_start.config(state=DISABLED)
         button_pause.config(state=NORMAL)
@@ -601,11 +614,13 @@ if __name__ == '__main__':
         button_start.config(state=NORMAL)
         button_pause.config(state=DISABLED)
         button_stop.config(state=DISABLED)
-        global window
+        global window_simulation
         # noinspection PyUnresolvedReferences
-        window.destroy()
+        window_simulation.destroy()
 
     button_start.config(command=lambda: start())
     button_pause.config(command=lambda: pause())
     button_stop.config(command=lambda: stop())
     root.mainloop()
+
+    plt.close()
