@@ -13,6 +13,8 @@ from matplotlib import pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 import matplotlib
 matplotlib.use("TkAgg")
+import os
+os.environ["PATH"] += os.pathsep + os.path.join('C:\\', 'Program Files', 'Graphviz', 'bin')
 
 
 class Kuramoto(kuramoto.Kuramoto):
@@ -379,7 +381,7 @@ if __name__ == '__main__':
     root = Tk()
 
     root.title('Курамото v0.1')
-    root.geometry('{:.0f}x{:.0f}'.format(875, 575))
+    # root.geometry('{:.0f}x{:.0f}'.format(875, 575))
     root.resizable(width=False, height=False)
 
     N = IntVar(root, value=onn.N)
@@ -418,17 +420,17 @@ if __name__ == '__main__':
 
     window_graph = None
 
-    # def show_graph():
-    #     global window_graph
-    #     window_graph = Toplevel(root)
-    #     window_graph.title('Граф связей')
-    #     fig, _ = plt.subplots(figsize=(5, 4))
-    #     canvas = FigureCanvasTkAgg(fig, master=window_graph)
-    #     canvas.draw()
-    #     canvas.get_tk_widget().pack(side=TOP, fill=BOTH, expand=1)
-    #     onn.show_graph(canvas)
-    #
-    # menu[0].add_command(label='Предпросмотр...', command=lambda: show_graph())
+    def show_graph():
+        global window_graph
+        window_graph = Toplevel(root)
+        window_graph.title('Граф связей')
+        fig, _ = plt.subplots(figsize=(5, 4))
+        canvas = FigureCanvasTkAgg(fig, master=window_graph)
+        canvas.draw()
+        canvas.get_tk_widget().pack(side=TOP, fill=BOTH, expand=1)
+        onn.show_graph(canvas)
+
+    menu[0].add_command(label='Предпросмотр...', command=lambda: show_graph())
 
     # Матрица смежности
     multiplier = StringVar(root, value=onn.multiplier_mode.name)
