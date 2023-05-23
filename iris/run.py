@@ -8,14 +8,14 @@ from stats import Stats
 
 
 n_workers = 8
-K_range = np.linspace(0.001, 0.2, 100)
+K_range = np.linspace(0.001, 1., 200)
 
 dt, t_step, T = 0.1, 10, 15000
 
 seed = 42
 np.random.seed(seed)
 
-adj_mat = np.load('adjmat.npy')
+adj_mat = np.load('adjmat2.npy')
 omega = np.load('omega.npy')
 
 
@@ -23,11 +23,14 @@ def run(K: float) -> tuple[float, np.ndarray, int]:
     N = len(adj_mat)
     stats = Stats(N)  # 150
 
-    # phase_vec_init = np.zeros(N)
-    # nat_freqs_init = omega
+    phase_vec_init = np.zeros(N)
+    nat_freqs_init = omega
 
-    phase_vec_init = 2 * np.pi * np.random.random(size=N) - np.pi
-    nat_freqs_init = np.zeros(N)
+    # phase_vec_init = 2 * np.pi * np.random.random(size=N) - np.pi
+    # nat_freqs_init = np.zeros(N)
+
+    # phase_vec_init = np.zeros(N)
+    # nat_freqs_init = np.ones(N)
 
     t_curr = 0.
 
@@ -76,5 +79,5 @@ if __name__ == '__main__':
 
     results = sorted(results, key=lambda item: item[0])
 
-    with open('results_190523_1.bin', 'wb') as dump:
+    with open('results_230523_012.bin', 'wb') as dump:
         dill.dump(results, dump)
