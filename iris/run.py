@@ -8,7 +8,7 @@ from stats import Stats
 
 
 n_workers = 8
-K_range = np.linspace(0.001, 1, 240)
+K_range = np.linspace(0.001, 0.2, 100)
 
 dt, t_step, T = 0.1, 10, 15000
 
@@ -23,8 +23,11 @@ def run(K: float) -> tuple[float, np.ndarray, int]:
     N = len(adj_mat)
     stats = Stats(N)  # 150
 
-    phase_vec_init = np.zeros(N)
-    nat_freqs_init = omega
+    # phase_vec_init = np.zeros(N)
+    # nat_freqs_init = omega
+
+    phase_vec_init = 2 * np.pi * np.random.random(size=N) - np.pi
+    nat_freqs_init = np.zeros(N)
 
     t_curr = 0.
 
@@ -73,5 +76,5 @@ if __name__ == '__main__':
 
     results = sorted(results, key=lambda item: item[0])
 
-    with open('results.bin', 'wb') as dump:
+    with open('results_190523_1.bin', 'wb') as dump:
         dill.dump(results, dump)
